@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ examen.titulo }}</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+.exam-hero{background:linear-gradient(135deg,#182620,#1a3050);padding:28px 24px 44px;color:#EFF5F1;}
+.exam-hero h1{font-family:'Space Grotesk',sans-serif;font-size:24px;margin:0 0 4px;}
+.exam-hero p{color:#B7C4BC;font-size:13.5px;margin:0;}
+.exam-meta{font-size:12px;color:#8FE3BE;margin-top:8px;font-family:'JetBrains Mono',monospace;}
+
+/* ── Contador ── */
+.timer-bar{
+  position:sticky;top:0;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;
+  background:#fff;border-bottom:1px solid #DFE4DC;
+  padding:10px 24px;gap:16px;
+}
+.timer-wrap{display:flex;align-items:center;gap:10px;}
+.timer-display{
+  font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:600;
+  color:#144F3C;letter-spacing:.04em;min-width:68px;
+}
+.timer-display.warn{color:#B8792E;}
+.timer-display.danger{color:#B4373B;animation:pulse 1s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.timer-label{font-size:12px;color:#8A938A;}
+.progress-ring{transform:rotate(-90deg);}
+.progress-ring circle{transition:stroke-dashoffset .9s linear;}
+
+.q-count{font-size:13px;color:#5B655D;}
+.btn-entregar{
+  padding:9px 22px;background:#144F3C;color:#fff;border:none;
+  border-radius:999px;font-size:13.5px;font-weight:600;
+  font-family:'Inter',sans-serif;cursor:pointer;
+}
+.btn-entregar:hover{background:#1F7A5C;}
+
+/* ── Preguntas ── */
+.q-card{background:#fff;border:1px solid #DFE4DC;border-radius:16px;padding:22px;margin-bottom:14px;}
+.q-num{font-size:11px;font-family:'JetBrains Mono',monospace;color:#8A938A;font-weight:600;
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;}
+.q-badge{display:inline-block;font-size:10px;font-family:'JetBrains Mono',monospace;
+  padding:2px 8px;border-radius:999px;background:#E4F1EA;color:#144F3C;margin-left:6px;}
+.q-texto{font-size:15px;font-weight:600;color:#1B211D;margin-bottom:14px;
+  line-height:1.4;font-family:'Space Grotesk',sans-serif;}
+
+.opciones{display:flex;flex-direction:column;gap:8px;}
+.opcion-label{display:flex;align-items:flex-start;gap:10px;padding:11px 14px;
+  border:1.5px solid #DFE4DC;border-radius:10px;cursor:pointer;
+  transition:border-color .12s,background .12s;font-size:14px;}
+.opcion-label:hover{border-color:#1F7A5C;background:#E4F1EA;}
+.opcion-label input{margin-top:2px;flex-shrink:0;accent-color:#144F3C;}
+.opcion-label.checked{border-color:#1F7A5C;background:#E4F1EA;}
+
+.nota-rm{font-size:12px;color:#8A938A;margin-bottom:10px;font-style:italic;}
+.codigo-hueco{background:#141B17;color:#DCE6DF;border-radius:10px;
+  padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  line-height:1.7;margin-bottom:12px;white-space:pre-wrap;word-break:break-all;}
+.hueco-input{font-family:'JetBrains Mono',monospace;font-size:13px;
+  padding:9px 12px;border:1.5px solid #DFE4DC;border-radius:8px;
+  width:100%;background:#FAFBF9;color:#1B211D;}
+.hueco-input:focus{outline:2px solid #1F7A5C;outline-offset:1px;}
+.instruccion{font-size:13.5px;color:#5B655D;margin-bottom:10px;}
+
+.btn-back{display:inline-flex;align-items:center;gap:6px;color:#5B655D;
+  font-size:13.5px;text-decoration:none;margin-bottom:14px;}
+
+/* Modal tiempo agotado */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);
+  z-index:999;align-items:center;justify-content:center;}
+.modal-overlay.show{display:flex;}
+.modal-box{background:#fff;border-radius:20px;padding:32px;max-width:380px;
+  width:90%;text-align:center;}
+.modal-box h2{font-family:'Space Grotesk',sans-serif;margin:0 0 8px;font-size:22px;color:#B4373B;}
+.modal-box p{color:#5B655D;font-size:14px;margin:0 0 20px;}
+.modal-btn{width:100%;padding:12px;background:#144F3C;color:#fff;border:none;
+  border-radius:999px;font-size:14.5px;font-weight:600;cursor:pointer;}
+</style>
+</head>
+<body>
+
+<div class="exam-hero">
+  <div style="max-width:800px;margin:0 auto;">
+    <div style="font-size:12px;opacity:.6;font-family:'JetBrains Mono',monospace;margin-bottom:6px;">📄 {{ nombre }}</div>
+    <h1>{{ examen.titulo }}</h1>
+    <p>{{ examen.descripcion }}</p>
+    <div class="exam-meta">{{ examen.preguntas|length }} preguntas · {{ examen.duracion_minutos }} minutos</div>
+  </div>
+</div>
+
+<!-- Barra pegajosa con contador -->
+<div class="timer-bar">
+  <div class="timer-wrap">
+    <svg width="36" height="36" viewBox="0 0 36 36">
+      <circle cx="18" cy="18" r="15" fill="none" stroke="#DFE4DC" stroke-width="3"/>
+      <circle class="progress-ring" id="timerRing" cx="18" cy="18" r="15"
+        fill="none" stroke="#1F7A5C" stroke-width="3"
+        stroke-dasharray="94.25" stroke-dashoffset="0"/>
+    </svg>
+    <div>
+      <div class="timer-display" id="timerDisplay">{{ "%02d:00"|format(examen.duracion_minutos) }}</div>
+      <div class="timer-label">tiempo restante</div>
+    </div>
+  </div>
+  <div class="q-count" id="qCount">0 / {{ examen.preguntas|length }} respondidas</div>
+  <button type="button" class="btn-entregar" id="btnEntregar" onclick="entregar()">Entregar →</button>
+</div>
+
+<!-- Modal tiempo agotado -->
+<div class="modal-overlay" id="modalTiempo">
+  <div class="modal-box">
+    <h2>⏰ Tiempo agotado</h2>
+    <p>Se acabó el tiempo. Las respuestas que llenaste se envían automáticamente.</p>
+    <button class="modal-btn" onclick="submitForm()">Ver mi resultado</button>
+  </div>
+</div>
+
+<div class="wrap" style="max-width:800px;padding-top:20px;">
+  <a class="btn-back" href="{{ url_for('index') }}">← Volver al validador</a>
+
+  <form method="post" action="{{ url_for('resultado_examen', tipo=tipo) }}" id="examForm">
+    {% for i, p in examen.preguntas|enumerate %}
+    <div class="q-card" id="qcard{{ i }}">
+      <div class="q-num">
+        Pregunta {{ i+1 }} de {{ examen.preguntas|length }}
+        <span class="q-badge">
+          {% if p.tipo=='opcion_multiple' %}Opción múltiple
+          {% elif p.tipo=='respuesta_multiple' %}Respuesta múltiple
+          {% else %}Completar código{% endif %}
+        </span>
+      </div>
+
+      {% if p.tipo == 'opcion_multiple' %}
+        <div class="q-texto">{{ p.pregunta }}</div>
+        <div class="opciones">
+          {% for j, op in p.opciones|enumerate %}
+          <label class="opcion-label" id="lbl{{ i }}_{{ j }}">
+            <input type="radio" name="q{{ i }}" value="{{ j }}"
+              onchange="marcarOM({{ i }},{{ j }});contarRespondidas()">
+            <span>{{ op }}</span>
+          </label>
+          {% endfor %}
+        </div>
+
+      {% elif p.tipo == 'respuesta_multiple' %}
+        <div class="q-texto">{{ p.pregunta }}</div>
+        <div class="nota-rm">Selecciona todas las que apliquen.</div>
+        <div class="opciones">
+          {% for j, op in p.opciones|enumerate %}
+          <label class="opcion-label" id="lbl{{ i }}_{{ j }}">
+            <input type="checkbox" name="q{{ i }}" value="{{ j }}"
+              onchange="marcarCB('lbl{{ i }}_{{ j }}',this);contarRespondidas()">
+            <span>{{ op }}</span>
+          </label>
+          {% endfor %}
+        </div>
+
+      {% elif p.tipo == 'completar_codigo' %}
+        <div class="instruccion">{{ p.instruccion }}</div>
+        <div class="codigo-hueco">{{ p.codigo_con_huecos }}</div>
+        <input class="hueco-input" type="text" name="q{{ i }}"
+          placeholder="Escribe la palabra que va en _____"
+          autocomplete="off" oninput="contarRespondidas()">
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    <button type="submit" class="btn-validar" id="btnSubmit" style="display:none;">Enviar</button>
+  </form>
+</div>
+
+<script>
+// ── Contador ────────────────────────────────────────────────────────────────
+const DURACION = {{ examen.duracion_minutos }} * 60;
+let segundos = DURACION;
+const display  = document.getElementById('timerDisplay');
+const ring     = document.getElementById('timerRing');
+const CIRCUNF  = 94.25;
+
+function actualizarReloj(){
+  const m = String(Math.floor(segundos/60)).padStart(2,'0');
+  const s = String(segundos%60).padStart(2,'0');
+  display.textContent = `${m}:${s}`;
+  const offset = CIRCUNF * (1 - segundos/DURACION);
+  ring.style.strokeDashoffset = offset;
+
+  if (segundos <= 60)       { display.className='timer-display danger'; ring.style.stroke='#B4373B'; }
+  else if (segundos <= 300) { display.className='timer-display warn';   ring.style.stroke='#B8792E'; }
+
+  if (segundos <= 0){
+    clearInterval(intervalo);
+    document.getElementById('modalTiempo').classList.add('show');
+  }
+  segundos--;
+}
+const intervalo = setInterval(actualizarReloj, 1000);
+actualizarReloj();
+
+function submitForm(){ document.getElementById('examForm').submit(); }
+function entregar(){
+  if (confirm('¿Seguro que quieres entregar el examen?')) submitForm();
+}
+
+// ── Marcar seleccionadas ───────────────────────────────────────────────────
+function marcarOM(pregIdx, opIdx){
+  // quitar checked de todos los labels de esa pregunta
+  document.querySelectorAll(`[id^="lbl${pregIdx}_"]`)
+    .forEach(el => el.classList.remove('checked'));
+  document.getElementById(`lbl${pregIdx}_${opIdx}`).classList.add('checked');
+}
+function marcarCB(lblId, cb){
+  document.getElementById(lblId).classList.toggle('checked', cb.checked);
+}
+
+// ── Contador de respondidas ────────────────────────────────────────────────
+const TOTAL = {{ examen.preguntas|length }};
+function contarRespondidas(){
+  let c = 0;
+  for(let i=0;i<TOTAL;i++){
+    const radios = document.querySelectorAll(`input[name="q${i}"][type="radio"]:checked`);
+    const checks = document.querySelectorAll(`input[name="q${i}"][type="checkbox"]:checked`);
+    const texto  = document.querySelector(`input[name="q${i}"][type="text"]`);
+    if(radios.length || checks.length || (texto && texto.value.trim())) c++;
+  }
+  document.getElementById('qCount').textContent = `${c} / ${TOTAL} respondidas`;
+}
+</script>
+</body>
+</html>
