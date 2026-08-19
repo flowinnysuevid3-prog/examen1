@@ -55,9 +55,10 @@ class Examen:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _py(archivos): return [a for a in archivos if a.titulo.endswith('.py')]
-def _sql(archivos): return [a for a in archivos if a.titulo.endswith('.sql')]
-def _html(archivos): return [a for a in archivos if a.titulo.endswith('.html')]
+def _limpia(titulo): return titulo.strip().strip('`').strip()
+def _py(archivos):   return [a for a in archivos if _limpia(a.titulo).endswith('.py')]
+def _sql(archivos):  return [a for a in archivos if _limpia(a.titulo).endswith('.sql') or a.lenguaje.lower() == 'sql']
+def _html(archivos): return [a for a in archivos if _limpia(a.titulo).endswith('.html')]
 def _novacias(codigo): return [l for l in codigo.splitlines() if l.strip()]
 
 def _om(pregunta, val_correcto, resto, explicacion, retroalimentacion, rng):
