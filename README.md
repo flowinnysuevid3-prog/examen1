@@ -1,2 +1,0 @@
-# examen1
-jkdajs

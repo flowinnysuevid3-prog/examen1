@@ -225,7 +225,8 @@ def resultado_examen(tipo: str):
             correctas_count += int(ok)
             detalle.append({"tipo": "opcion_multiple", "pregunta": p.pregunta,
                 "opciones": p.opciones, "correcta": p.correcta,
-                "seleccionada": sel, "ok": ok, "explicacion": p.explicacion})
+                "seleccionada": sel, "ok": ok, "explicacion": p.explicacion,
+                "retroalimentacion": p.retroalimentacion if not ok else ""})
         elif p.tipo == "respuesta_multiple":
             vals = request.form.getlist(clave)
             sels = sorted([int(v) for v in vals if v.isdigit()])
@@ -233,7 +234,8 @@ def resultado_examen(tipo: str):
             correctas_count += int(ok)
             detalle.append({"tipo": "respuesta_multiple", "pregunta": p.pregunta,
                 "opciones": p.opciones, "correctas": p.correctas,
-                "seleccionadas": sels, "ok": ok, "explicacion": p.explicacion})
+                "seleccionadas": sels, "ok": ok, "explicacion": p.explicacion,
+                "retroalimentacion": p.retroalimentacion if not ok else ""})
         elif p.tipo == "completar_codigo":
             resp = (request.form.get(clave) or "").strip()
             ok   = resp.lower() == p.respuestas[0].strip().lower()
@@ -241,7 +243,8 @@ def resultado_examen(tipo: str):
             detalle.append({"tipo": "completar_codigo", "instruccion": p.instruccion,
                 "codigo_con_huecos": p.codigo_con_huecos,
                 "respuesta_correcta": p.respuestas[0],
-                "respuesta_usuario": resp, "ok": ok, "explicacion": p.explicacion})
+                "respuesta_usuario": resp, "ok": ok, "explicacion": p.explicacion,
+                "retroalimentacion": p.retroalimentacion if not ok else ""})
 
     calificacion = round((correctas_count / total) * 100) if total else 0
 

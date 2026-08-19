@@ -1,14 +1,10 @@
 """
-examenes.py — Generador de exámenes a partir de un .md validado.
+examenes.py — Generador de exámenes 100% de código.
 
-Tipos disponibles:
-  opcion_multiple    20 preguntas, 1 correcta de 4 opciones
-  respuesta_multiple 15 preguntas, varias correctas
-  completar_codigo   15 fragmentos con hueco _____
-  combinado          20 preguntas mezcladas (7+7+6)
-
-Las preguntas se derivan del contenido REAL del archivo .md;
-no hay preguntas inventadas ni hardcodeadas.
+- 40 preguntas por tipo (o todas las disponibles si el md tiene poco)
+- Solo preguntas de código: imports, funciones, rutas, SQL, Jinja2
+- Retroalimentación específica por pregunta indicando dónde está la respuesta
+- Sin preguntas de datos personales del alumno
 """
 
 from __future__ import annotations
@@ -17,7 +13,7 @@ from dataclasses import dataclass, field
 from parser import ResultadoValidacion, Archivo
 
 
-# ── Tipos de dato ─────────────────────────────────────────────────────────────
+# ── Tipos ─────────────────────────────────────────────────────────────────────
 
 @dataclass
 class OpcionMultiple:
@@ -26,6 +22,7 @@ class OpcionMultiple:
     opciones: list[str] = field(default_factory=list)
     correcta: int = 0
     explicacion: str = ""
+    retroalimentacion: str = ""   # se muestra si falla
 
 @dataclass
 class RespuestaMultiple:
@@ -34,6 +31,7 @@ class RespuestaMultiple:
     opciones: list[str] = field(default_factory=list)
     correctas: list[int] = field(default_factory=list)
     explicacion: str = ""
+    retroalimentacion: str = ""
 
 @dataclass
 class CompletarCodigo:
@@ -42,6 +40,7 @@ class CompletarCodigo:
     codigo_con_huecos: str = ""
     respuestas: list[str] = field(default_factory=list)
     explicacion: str = ""
+    retroalimentacion: str = ""
 
 Pregunta = OpcionMultiple | RespuestaMultiple | CompletarCodigo
 
@@ -54,526 +53,605 @@ class Examen:
     preguntas: list[Pregunta] = field(default_factory=list)
 
 
-# ── Helpers generales ─────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _by_ext(archivos: list[Archivo], *exts) -> list[Archivo]:
-    return [a for a in archivos if a.titulo.rsplit(".", 1)[-1].lower() in exts]
+def _py(archivos): return [a for a in archivos if a.titulo.endswith('.py')]
+def _sql(archivos): return [a for a in archivos if a.titulo.endswith('.sql')]
+def _html(archivos): return [a for a in archivos if a.titulo.endswith('.html')]
+def _novacias(codigo): return [l for l in codigo.splitlines() if l.strip()]
 
-def _novacias(codigo: str) -> list[str]:
-    return [l for l in codigo.splitlines() if l.strip()]
-
-def _om(pregunta, val_correcto, resto: list[str], explicacion: str, rng: random.Random) -> OpcionMultiple:
-    """Construye OpcionMultiple mezclando opciones y recalculando índice correcto."""
-    opciones = [val_correcto] + [r for r in resto[:3] if r != val_correcto]
+def _om(pregunta, val_correcto, resto, explicacion, retroalimentacion, rng):
+    opciones = [val_correcto] + [r for r in resto if r != val_correcto][:3]
     while len(opciones) < 4:
-        opciones.append("(ninguna de las anteriores)")
+        opciones.append("# ninguna de las anteriores")
     opciones = opciones[:4]
     rng.shuffle(opciones)
     return OpcionMultiple(
-        pregunta=pregunta,
-        opciones=opciones,
+        pregunta=pregunta, opciones=opciones,
         correcta=opciones.index(val_correcto),
         explicacion=explicacion,
+        retroalimentacion=retroalimentacion,
     )
 
-def _rm(pregunta, correctas_vals: list[str], falsas_vals: list[str],
-        explicacion: str, rng: random.Random) -> RespuestaMultiple:
-    """Construye RespuestaMultiple mezclando opciones."""
+def _rm(pregunta, correctas_vals, falsas_vals, explicacion, retroalimentacion, rng):
     opciones = list(correctas_vals) + falsas_vals
     rng.shuffle(opciones)
     idxs = sorted([opciones.index(v) for v in correctas_vals if v in opciones])
     return RespuestaMultiple(
-        pregunta=pregunta,
-        opciones=opciones,
-        correctas=idxs,
-        explicacion=explicacion,
+        pregunta=pregunta, opciones=opciones, correctas=idxs,
+        explicacion=explicacion, retroalimentacion=retroalimentacion,
     )
 
+def _cc(instruccion, linea_original, target, explicacion, retroalimentacion):
+    hueco = linea_original.replace(target, "_____", 1).strip()
+    return CompletarCodigo(
+        instruccion=instruccion,
+        codigo_con_huecos=hueco,
+        respuestas=[target.strip()],
+        explicacion=explicacion,
+        retroalimentacion=retroalimentacion,
+    )
 
-# ── Banco de preguntas: Opción múltiple ───────────────────────────────────────
+def _dedup(banco):
+    """Elimina preguntas con el mismo enunciado o el mismo hueco."""
+    vistos = set()
+    resultado = []
+    for p in banco:
+        if hasattr(p, 'codigo_con_huecos'):
+            key = p.codigo_con_huecos
+        elif hasattr(p, 'pregunta'):
+            key = p.pregunta
+        else:
+            key = p.instruccion
+        if key not in vistos:
+            vistos.add(key)
+            resultado.append(p)
+    return resultado
+
+
+# ── BANCO OPCIÓN MÚLTIPLE (código puro) ───────────────────────────────────────
 
 def _banco_om(r: ResultadoValidacion, rng: random.Random) -> list[OpcionMultiple]:
-    banco: list[OpcionMultiple] = []
-    py    = _by_ext(r.archivos, "py")
-    sql   = _by_ext(r.archivos, "sql")
-    html  = _by_ext(r.archivos, "html")
-    req   = next((a for a in r.archivos if "requirements" in a.titulo), None)
-    gi    = next((a for a in r.archivos if "gitignore" in a.titulo), None)
+    banco = []
+    py_files  = _py(r.archivos)
+    sql_files = _sql(r.archivos)
+    html_files= _html(r.archivos)
 
-    # ── Alumno / proyecto ─────────────────────────────────────────────────────
-    banco.append(_om(
-        "¿Cuál es el correo electrónico del alumno registrado en la sección 1.1?",
-        r.alumno.get("Email","—"),
-        ["admin@render.com","noreply@utec.mx","soporte@supabase.io"],
-        f"El correo está en la sección 1.1: {r.alumno.get('Email','—')}.", rng))
-
-    banco.append(_om(
-        "¿A qué grupo pertenece el alumno que entregó este proyecto?",
-        r.alumno.get("Grupo","—"),
-        ["TI00","TSU99","ISC01"],
-        f"Grupo declarado en 1.1: {r.alumno.get('Grupo','—')}.", rng))
-
-    banco.append(_om(
-        "¿Cuál es el nombre completo del primer apellido del alumno?",
-        r.alumno.get("Primer Apellido","—"),
-        ["García","Hernández","López"],
-        f"Primer apellido: {r.alumno.get('Primer Apellido','—')}.", rng))
-
-    obj = r.proyecto_objetivo
-    banco.append(_om(
-        "¿Cuál es el objetivo del proyecto según la sección 1.2?",
-        obj[:80]+"…" if len(obj)>80 else obj,
-        ["Vender productos en línea.","Gestionar nómina de empleados.","Crear red social médica."],
-        "El objetivo se declara en la sección 1.2.", rng))
-
-    banco.append(_om(
-        "¿Cuál es el nombre del proyecto declarado en la sección 1.2?",
-        r.proyecto_nombre,
-        ["SistemaWeb","AppMedica","GestorEscolar"],
-        f"Nombre: {r.proyecto_nombre}.", rng))
-
-    if r.modulos:
-        m = r.modulos[0]
-        banco.append(_om(
-            f"¿Qué operaciones incluye el módulo '{m.numero}'?",
-            m.texto, ["Solo lectura","Solo escritura","Pagos y facturación"],
-            f"Módulo {m.numero}: {m.texto}", rng))
-
-    if len(r.modulos) > 1:
-        m = r.modulos[1]
-        banco.append(_om(
-            f"¿Qué describe el módulo '{m.numero}' en este proyecto?",
-            m.texto, ["Autenticación OAuth","Reportes fiscales","Gestión de inventario"],
-            f"Módulo {m.numero}: {m.texto}", rng))
-
-    # ── Estructura de carpetas ────────────────────────────────────────────────
-    if r.estructura:
-        lineas = [l for l in r.estructura.splitlines() if l.strip()]
-        raiz = lineas[0].rstrip("/").strip()
-        banco.append(_om(
-            "¿Cuál es el nombre de la carpeta raíz del proyecto (sección 2.1)?",
-            raiz, ["src","app","proyecto"],
-            f"Primera línea del árbol: '{raiz}/'.", rng))
-
-        carpetas = [re.sub(r'[├└│─\s]+','',l).split('/')[0]
-                    for l in lineas[1:] if '/' not in re.sub(r'[├└│─\s]+','',l)
-                    and re.sub(r'[├└│─\s]+','',l)]
-        if carpetas:
-            c = rng.choice(carpetas)
-            banco.append(_om(
-                f"¿Existe la entrada '{c}' en la estructura de carpetas del proyecto?",
-                "Sí, aparece en la sección 2.1",
-                ["No, esa carpeta no existe","Solo en producción","Es una librería externa"],
-                f"'{c}' aparece explícitamente en el árbol de la sección 2.1.", rng))
-
-    # ── Requirements ─────────────────────────────────────────────────────────
-    if req:
-        libs = [l.strip() for l in _novacias(req.codigo) if "==" in l]
-        usadas: set[str] = set()
-        for lib in libs:
-            nombre = lib.split("==")[0]
-            if nombre not in usadas:
-                usadas.add(nombre)
-                banco.append(_om(
-                    f"¿Cuál es la versión exacta de '{nombre}' en requirements.txt?",
-                    lib,
-                    [f"{nombre}==1.0.0", f"{nombre}==99.9", f"{nombre}==0.0.1"],
-                    f"requirements.txt declara '{lib}'.", rng))
-
-    # ── .gitignore ────────────────────────────────────────────────────────────
-    if gi:
-        lineas_gi = [l.strip() for l in _novacias(gi.codigo)]
-        for entry in rng.sample(lineas_gi, min(3, len(lineas_gi))):
-            banco.append(_om(
-                "¿Cuál de estas entradas está en el .gitignore del proyecto?",
-                entry,
-                ["dist/","build/","coverage/"],
-                f"'{entry}' aparece en el .gitignore.", rng))
-
-    # ── Python: imports ───────────────────────────────────────────────────────
-    todos_imports: list[tuple[str,str]] = []
-    for pf in py:
-        for l in _novacias(pf.codigo):
-            if l.strip().startswith(("import ","from ")):
-                todos_imports.append((pf.titulo, l.strip()))
-
+    # ── PYTHON: imports ────────────────────────────────────────────────────────
+    todos_imports = []
+    for a in py_files:
+        for l in _novacias(a.codigo):
+            if l.strip().startswith(('import ','from ')):
+                todos_imports.append((a.titulo, l.strip()))
     rng.shuffle(todos_imports)
-    usados_imp: set[str] = set()
-    for fname, imp in todos_imports[:8]:
+    usados_imp = set()
+    for fname, imp in todos_imports:
         if imp in usados_imp: continue
         usados_imp.add(imp)
         banco.append(_om(
-            f"¿Cuál importación existe en '{fname}'?",
+            f"¿Cuál de estas líneas de importación existe en '{fname}'?",
             imp,
-            ["import pandas as pd","from django.db import models","import tensorflow as tf"],
-            f"La línea '{imp}' está en {fname}.", rng))
+            ["import pandas as pd", "from django.db import models",
+             "import tensorflow as tf", "from numpy import array"],
+            f"La línea '{imp}' está declarada en {fname}.",
+            f"Revisa la sección de imports al inicio de {fname}. La respuesta correcta es:\n{imp}",
+            rng
+        ))
 
-    # ── Python: definición de funciones ───────────────────────────────────────
-    for pf in py:
-        defs = [l.strip() for l in _novacias(pf.codigo)
-                if l.strip().startswith("def ") and len(l.strip()) < 80]
+    # ── PYTHON: definiciones de funciones ──────────────────────────────────────
+    for a in py_files:
+        defs = [l.strip() for l in _novacias(a.codigo)
+                if l.strip().startswith('def ') and len(l.strip()) < 80]
         rng.shuffle(defs)
-        for d in defs[:3]:
-            fname_func = d.split("(")[0].replace("def ","").strip()
+        for d in defs[:6]:
+            nombre_func = d.split('(')[0].replace('def ','').strip()
             banco.append(_om(
-                f"¿Cuál de estas funciones está definida en '{pf.titulo}'?",
+                f"¿Cuál función está definida en '{a.titulo}'?",
                 d,
-                [f"def procesar_pago(request):",f"def enviar_email(to, body):",f"def calcular_iva(monto):"],
-                f"'{d}' está en {pf.titulo}.", rng))
+                ["def procesar_pago(monto, cuenta):",
+                 "def enviar_correo(destinatario, asunto):",
+                 "def calcular_descuento(precio, porcentaje):"],
+                f"'{d}' está definida en {a.titulo}.",
+                f"Busca 'def {nombre_func}' en {a.titulo}. La firma correcta es:\n{d}",
+                rng
+            ))
 
-    # ── Python: decoradores de ruta ───────────────────────────────────────────
-    for pf in py:
-        rutas = [l.strip() for l in _novacias(pf.codigo)
-                 if l.strip().startswith("@") and "route" in l and len(l.strip()) < 100]
+    # ── PYTHON: rutas (decoradores) ─────────────────────────────────────────────
+    for a in py_files:
+        rutas = [l.strip() for l in _novacias(a.codigo)
+                 if l.strip().startswith('@') and 'route' in l and len(l.strip()) < 100]
         rng.shuffle(rutas)
-        for ruta in rutas[:3]:
+        for ruta in rutas[:5]:
             banco.append(_om(
-                f"¿Cuál ruta (decorador) existe en '{pf.titulo}'?",
+                f"¿Cuál decorador de ruta existe en '{a.titulo}'?",
                 ruta,
-                ['@app.route("/dashboard")', '@app.route("/shop")', '@bp.route("/payment")'],
-                f"'{ruta}' está en {pf.titulo}.", rng))
+                ['@app.route("/shop/cart", methods=["GET"])',
+                 '@bp.route("/admin/users", methods=["POST"])',
+                 '@app.route("/payment/confirm")'],
+                f"'{ruta}' está en {a.titulo}.",
+                f"Busca los decoradores @route en {a.titulo}. La ruta correcta es:\n{ruta}",
+                rng
+            ))
 
-    # ── SQL: tablas ───────────────────────────────────────────────────────────
-    if sql:
-        tablas = list(dict.fromkeys(
-            re.findall(r'CREATE TABLE\s+(\w+)', sql[0].codigo, re.IGNORECASE)))
-        falsas_t = [t for t in ["pedido","factura","inventario","producto","empleado","cliente"]
-                    if t not in tablas]
-        for tabla in rng.sample(tablas, min(5, len(tablas))):
+    # ── PYTHON: líneas return con lógica ───────────────────────────────────────
+    for a in py_files:
+        returns = [l.strip() for l in _novacias(a.codigo)
+                   if l.strip().startswith('return ') and
+                   any(kw in l for kw in ['render_template','redirect','jsonify','url_for'])
+                   and len(l.strip()) < 100]
+        rng.shuffle(returns)
+        for ret in returns[:4]:
             banco.append(_om(
-                "¿Cuál de estas tablas SÍ se crea en el schema SQL?",
-                tabla,
-                rng.sample(falsas_t, min(3, len(falsas_t))),
-                f"'{tabla}' se define con CREATE TABLE en script.sql.", rng))
+                f"¿Cuál instrucción return existe en '{a.titulo}'?",
+                ret,
+                ["return render_template('admin/panel.html')",
+                 "return redirect(url_for('shop.cart'))",
+                 "return jsonify({'status': 'error'})"],
+                f"'{ret}' está en {a.titulo}.",
+                f"Revisa los returns en {a.titulo}. La respuesta correcta es:\n{ret}",
+                rng
+            ))
 
-        # ── SQL: columnas de una tabla ────────────────────────────────────────
-        for tabla in rng.sample(tablas, min(3, len(tablas))):
-            patron = rf'CREATE TABLE\s+{tabla}\s*\((.*?)(?:CREATE TABLE|\Z)'
-            bloque = re.search(patron, sql[0].codigo, re.DOTALL | re.IGNORECASE)
+    # ── PYTHON: with/cursor ────────────────────────────────────────────────────
+    for a in py_files:
+        withs = [l.strip() for l in _novacias(a.codigo)
+                 if l.strip().startswith('with ') and len(l.strip()) < 80]
+        rng.shuffle(withs)
+        for w in withs[:3]:
+            banco.append(_om(
+                f"¿Cuál bloque 'with' aparece en '{a.titulo}'?",
+                w,
+                ["with open('archivo.txt', 'r') as f:",
+                 "with sqlite3.connect('db.sqlite') as conn:",
+                 "with requests.Session() as s:"],
+                f"'{w}' aparece en {a.titulo}.",
+                f"Busca los bloques 'with' en {a.titulo}. La respuesta es:\n{w}",
+                rng
+            ))
+
+    # ── SQL: tablas ─────────────────────────────────────────────────────────────
+    if sql_files:
+        tablas = list(dict.fromkeys(
+            re.findall(r'CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(\w+)',
+                       sql_files[0].codigo, re.I)))
+        falsas_t = [t for t in
+                    ["pedido","factura","inventario","producto","empleado","cliente","proveedor"]
+                    if t not in tablas]
+        for tabla in rng.sample(tablas, min(6, len(tablas))):
+            banco.append(_om(
+                "¿Cuál tabla SÍ se define en el schema SQL del proyecto?",
+                tabla,
+                rng.sample(falsas_t, min(3,len(falsas_t))),
+                f"La tabla '{tabla}' se crea con CREATE TABLE en script.sql.",
+                f"Busca 'CREATE TABLE {tabla}' en script.sql. Esa tabla sí existe en el schema.",
+                rng
+            ))
+
+    # ── SQL: columnas ───────────────────────────────────────────────────────────
+    if sql_files:
+        for tabla in list(dict.fromkeys(
+            re.findall(r'CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(\w+)',
+                       sql_files[0].codigo, re.I)))[:6]:
+            patron = rf'CREATE TABLE\s+(?:IF NOT EXISTS\s+)?{tabla}\s*\((.*?)(?:CREATE TABLE|\Z)'
+            bloque = re.search(patron, sql_files[0].codigo, re.DOTALL|re.I)
             if bloque:
-                cols = re.findall(r'^\s+(\w+)\s+\w+', bloque.group(1), re.MULTILINE)
-                cols = [c for c in cols if c.upper() not in ("FOREIGN","PRIMARY","CONSTRAINT","UNIQUE")]
+                cols = re.findall(r'^\s+(\w+)\s+(?:INTEGER|TEXT|TIMESTAMP|DATE|BOOLEAN|REAL)',
+                                  bloque.group(1), re.M|re.I)
+                cols = [c for c in cols if c.upper() not in
+                        ('FOREIGN','PRIMARY','CONSTRAINT','UNIQUE','CHECK')]
                 if cols:
                     col = rng.choice(cols)
                     banco.append(_om(
-                        f"¿Cuál columna pertenece a la tabla '{tabla}'?",
+                        f"¿Cuál columna pertenece a la tabla '{tabla}' en el schema SQL?",
                         col,
-                        ["precio_total","nombre_comercial","codigo_barras"],
-                        f"La columna '{col}' está definida en la tabla {tabla}.", rng))
+                        ["precio_unitario","codigo_barras","nombre_comercial","stock_minimo"],
+                        f"La columna '{col}' está definida dentro de CREATE TABLE {tabla}.",
+                        f"Abre script.sql y busca 'CREATE TABLE {tabla}'. La columna '{col}' está ahí.",
+                        rng
+                    ))
 
-        # ── SQL: CHECK constraints ────────────────────────────────────────────
-        checks = re.findall(r"CHECK\((.+?)\)", sql[0].codigo)
-        for c in rng.sample(checks, min(4, len(checks))):
+    # ── SQL: CHECK constraints ──────────────────────────────────────────────────
+    if sql_files:
+        checks = re.findall(r"CHECK\((.+?)\)", sql_files[0].codigo)
+        for c in rng.sample(checks, min(5, len(checks))):
             banco.append(_om(
                 "¿Cuál CHECK constraint aparece en el schema SQL?",
                 f"CHECK({c})",
-                ["CHECK(precio > 0)","CHECK(cantidad BETWEEN 100 AND 999)","CHECK(rol IN ('admin'))"],
-                f"El constraint CHECK({c}) está en script.sql.", rng))
+                ["CHECK(precio > 0)","CHECK(cantidad BETWEEN 1 AND 999)",
+                 "CHECK(activo IN (0,1))"],
+                f"El constraint CHECK({c}) está en script.sql.",
+                f"Busca los CHECK en script.sql. El constraint correcto es:\nCHECK({c})",
+                rng
+            ))
 
-        # ── SQL: ON DELETE / ON UPDATE ────────────────────────────────────────
-        on_clauses = re.findall(r'(ON (?:DELETE|UPDATE) \w+)', sql[0].codigo, re.IGNORECASE)
-        on_clauses = list(dict.fromkeys(on_clauses))
-        if on_clauses:
-            oc = rng.choice(on_clauses)
+    # ── SQL: FOREIGN KEY ────────────────────────────────────────────────────────
+    if sql_files:
+        fks = re.findall(
+            r'FOREIGN KEY\s*\((\w+)\)\s*REFERENCES\s*(\w+)\s*\((\w+)\)',
+            sql_files[0].codigo, re.I)
+        for col, ref_tabla, ref_col in rng.sample(fks, min(4, len(fks))):
+            fk_str = f"FOREIGN KEY ({col}) REFERENCES {ref_tabla}({ref_col})"
             banco.append(_om(
-                "¿Cuál cláusula referencial aparece en las FOREIGN KEY del schema?",
-                oc,
-                ["ON DELETE NOTHING","ON UPDATE IGNORE","ON DELETE RESTRICT ALL"],
-                f"La cláusula '{oc}' está en las FK de script.sql.", rng))
+                "¿Cuál FOREIGN KEY está definida en el schema SQL?",
+                fk_str,
+                ["FOREIGN KEY (id_producto) REFERENCES catalogo(id)",
+                 "FOREIGN KEY (empleado_id) REFERENCES staff(id)",
+                 "FOREIGN KEY (orden_id) REFERENCES pedidos(cod)"],
+                f"'{fk_str}' está en script.sql.",
+                f"Busca las FOREIGN KEY en script.sql. La correcta es:\n{fk_str}",
+                rng
+            ))
 
-    # ── HTML: extends y bloques ───────────────────────────────────────────────
-    for hf in html:
-        ext = re.search(r'{%\s*extends\s*"([^"]+)"', hf.codigo)
+    # ── SQL: tipo de dato de columna ────────────────────────────────────────────
+    if sql_files:
+        col_tipos = re.findall(
+            r'^\s+(\w+)\s+(INTEGER|TEXT|TIMESTAMP|DATE|BOOLEAN|REAL)',
+            sql_files[0].codigo, re.M|re.I)
+        col_tipos = [(c,t) for c,t in col_tipos
+                     if c.upper() not in ('FOREIGN','PRIMARY','CONSTRAINT')]
+        for col, tipo in rng.sample(col_tipos, min(5, len(col_tipos))):
+            banco.append(_om(
+                f"¿Qué tipo de dato tiene la columna '{col}' en el schema SQL?",
+                tipo.upper(),
+                [t for t in ["INTEGER","TEXT","TIMESTAMP","DATE","BOOLEAN","REAL"]
+                 if t != tipo.upper()][:3],
+                f"La columna '{col}' es de tipo {tipo.upper()} en script.sql.",
+                f"Busca '{col}' en script.sql. Su tipo de dato es {tipo.upper()}.",
+                rng
+            ))
+
+    # ── HTML: extends ───────────────────────────────────────────────────────────
+    for a in html_files:
+        ext = re.search(r'{%\s*extends\s*"([^"]+)"', a.codigo)
         if ext:
             banco.append(_om(
-                f"¿De qué template hereda '{hf.titulo.split('/')[-1]}'?",
+                f"¿De qué template hereda '{a.titulo.split('/')[-1]}'?",
                 ext.group(1),
-                ["base/main.html","static/index.html","templates/root.html"],
-                f"{{% extends %}} apunta a '{ext.group(1)}'.", rng))
+                ["base/main.html","static/layout.html","templates/root.html"],
+                f"{{% extends %}} apunta a '{ext.group(1)}' en {a.titulo.split('/')[-1]}.",
+                f"Busca la directiva {{% extends %}} al inicio de {a.titulo.split('/')[-1]}. Hereda de: {ext.group(1)}",
+                rng
+            ))
 
-        bloques = list(dict.fromkeys(re.findall(r'{%\s*block\s+(\w+)', hf.codigo)))
-        for b in rng.sample(bloques, min(2, len(bloques))):
+    # ── HTML: bloques ────────────────────────────────────────────────────────────
+    for a in html_files:
+        bloques = list(dict.fromkeys(re.findall(r'{%\s*block\s+(\w+)', a.codigo)))
+        for b in rng.sample(bloques, min(3, len(bloques))):
             banco.append(_om(
-                f"¿Cuál bloque Jinja2 está definido en '{hf.titulo.split('/')[-1]}'?",
+                f"¿Cuál bloque Jinja2 está definido en '{a.titulo.split('/')[-1]}'?",
                 f"{{% block {b} %}}",
-                ["{% block sidebar %}","{% block footer %}","{% block meta %}"],
-                f"El bloque '{b}' aparece en {hf.titulo.split('/')[-1]}.", rng))
+                ["{{% block sidebar %}}","{{% block footer %}}","{{% block scripts %}}"],
+                f"El bloque '{b}' aparece en {a.titulo.split('/')[-1]}.",
+                f"Busca '{{% block {b} %}}' en {a.titulo.split('/')[-1]}. Ese bloque sí existe.",
+                rng
+            ))
 
-        rutas_jinja = list(dict.fromkeys(
-            re.findall(r"url_for\('([^']+)'", hf.codigo)))
-        for rj in rng.sample(rutas_jinja, min(3, len(rutas_jinja))):
+    # ── HTML: url_for ────────────────────────────────────────────────────────────
+    for a in html_files:
+        endpoints = list(dict.fromkeys(re.findall(r"url_for\('([^']+)'", a.codigo)))
+        for ep in rng.sample(endpoints, min(4, len(endpoints))):
             banco.append(_om(
-                f"¿Cuál endpoint se referencia con url_for en '{hf.titulo.split('/')[-1]}'?",
-                f"url_for('{rj}')",
+                f"¿Cuál endpoint se referencia con url_for en '{a.titulo.split('/')[-1]}'?",
+                f"url_for('{ep}')",
                 ["url_for('admin.panel')","url_for('shop.cart')","url_for('auth.register')"],
-                f"url_for('{rj}') aparece en {hf.titulo.split('/')[-1]}.", rng))
+                f"url_for('{ep}') aparece en {a.titulo.split('/')[-1]}.",
+                f"Busca url_for en {a.titulo.split('/')[-1]}. El endpoint correcto es: url_for('{ep}')",
+                rng
+            ))
 
-    return banco
+    return _dedup(banco)
 
 
-# ── Banco de preguntas: Respuesta múltiple ────────────────────────────────────
+# ── BANCO RESPUESTA MÚLTIPLE ──────────────────────────────────────────────────
 
 def _banco_rm(r: ResultadoValidacion, rng: random.Random) -> list[RespuestaMultiple]:
-    banco: list[RespuestaMultiple] = []
-    py  = _by_ext(r.archivos, "py")
-    sql = _by_ext(r.archivos, "sql")
-    req = next((a for a in r.archivos if "requirements" in a.titulo), None)
-    gi  = next((a for a in r.archivos if "gitignore" in a.titulo), None)
-    html = _by_ext(r.archivos, "html")
+    banco = []
+    py_files  = _py(r.archivos)
+    sql_files = _sql(r.archivos)
+    html_files= _html(r.archivos)
 
-    # módulos
-    if r.modulos:
-        textos = [m.texto.split("(")[0].strip() for m in r.modulos]
-        banco.append(_rm(
-            "¿Cuáles son módulos desarrollados en este proyecto? (selecciona todos)",
-            textos, ["Inventario","Nómina","Pagos en línea","Logística"],
-            f"Módulos: {', '.join(textos)}.", rng))
+    # imports por archivo
+    for a in py_files:
+        imports = list(dict.fromkeys([
+            l.strip() for l in _novacias(a.codigo)
+            if l.strip().startswith(('import ','from '))]))
+        muestra = imports[:6] if len(imports) >= 3 else imports
+        if len(muestra) >= 2:
+            banco.append(_rm(
+                f"¿Cuáles de estas importaciones están en '{a.titulo}'?",
+                muestra[:4],
+                ["import pandas as pd","from django.db import models",
+                 "import tensorflow","from numpy import array"],
+                f"Imports reales en {a.titulo}: {', '.join(muestra)}.",
+                f"Abre {a.titulo} y revisa los imports al inicio. Los correctos son:\n" + "\n".join(muestra[:4]),
+                rng
+            ))
 
-    # librerías
-    if req:
-        libs = [l.split("==")[0].strip() for l in _novacias(req.codigo) if "==" in l]
-        banco.append(_rm(
-            "¿Cuáles librerías están en requirements.txt?",
-            libs, ["Django","NumPy","TensorFlow","Celery","Pillow"],
-            f"Librerías: {', '.join(libs)}.", rng))
+    # funciones por archivo
+    for a in py_files:
+        defs = list(dict.fromkeys([
+            l.strip().split('(')[0].replace('def ','').strip()
+            for l in _novacias(a.codigo) if l.strip().startswith('def ')]))
+        if len(defs) >= 3:
+            muestra = defs[:5]
+            banco.append(_rm(
+                f"¿Cuáles funciones están definidas en '{a.titulo}'?",
+                muestra[:4],
+                ["procesar_pago","enviar_factura","calcular_impuesto","validar_stock"],
+                f"Funciones reales en {a.titulo}: {', '.join(defs)}.",
+                f"Busca 'def ' en {a.titulo}. Las funciones que SÍ existen son:\n" + "\n".join(f"def {d}(...)" for d in muestra[:4]),
+                rng
+            ))
 
-    # gitignore
-    if gi:
-        lineas = [l.strip() for l in _novacias(gi.codigo)]
-        muestra = lineas[:5]
-        banco.append(_rm(
-            "¿Cuáles entradas están en el .gitignore?",
-            muestra, ["dist/","build/","coverage/","release/"],
-            f"Entradas reales: {', '.join(muestra)}.", rng))
+    # rutas por archivo
+    for a in py_files:
+        rutas = list(dict.fromkeys([
+            re.search(r'["\']([^"\']+)["\']', l).group(1)
+            for l in _novacias(a.codigo)
+            if '@' in l and 'route' in l and re.search(r'["\']([^"\']+)["\']', l)]))
+        if len(rutas) >= 3:
+            muestra = rutas[:5]
+            banco.append(_rm(
+                f"¿Cuáles rutas están definidas en '{a.titulo}'?",
+                muestra[:4],
+                ["/shop/cart","/admin/dashboard","/payment/confirm"],
+                f"Rutas reales en {a.titulo}: {', '.join(rutas)}.",
+                f"Busca los decoradores @route en {a.titulo}. Las rutas que SÍ existen:\n" + "\n".join(muestra[:4]),
+                rng
+            ))
 
     # tablas SQL
-    if sql:
+    if sql_files:
         tablas = list(dict.fromkeys(
-            re.findall(r'CREATE TABLE\s+(\w+)', sql[0].codigo, re.IGNORECASE)))
+            re.findall(r'CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(\w+)',
+                       sql_files[0].codigo, re.I)))
+        falsas = [t for t in ["pedido","factura","inventario","producto","empleado"]
+                  if t not in tablas]
         muestra = rng.sample(tablas, min(5, len(tablas)))
-        falsas = [t for t in ["pedido","factura","inventario","cliente","empleado"] if t not in tablas]
         banco.append(_rm(
             "¿Cuáles tablas SÍ existen en el schema SQL?",
-            muestra, falsas[:4],
-            f"Tablas reales: {', '.join(tablas)}.", rng))
+            muestra,
+            falsas[:4],
+            f"Tablas reales: {', '.join(tablas)}.",
+            f"Busca los CREATE TABLE en script.sql. Las tablas que SÍ existen:\n" + "\n".join(muestra),
+            rng
+        ))
 
-        # Tipos de datos usados
-        tipos = list(dict.fromkeys(re.findall(r'\b(INTEGER|TEXT|TIMESTAMP|DATE|BOOLEAN|REAL)\b', sql[0].codigo)))
-        if tipos:
+    # tipos de dato usados
+    if sql_files:
+        tipos = list(dict.fromkeys(re.findall(
+            r'\b(INTEGER|TEXT|TIMESTAMP|DATE|BOOLEAN|REAL)\b',
+            sql_files[0].codigo)))
+        if len(tipos) >= 2:
             banco.append(_rm(
                 "¿Cuáles tipos de dato se usan en el schema SQL?",
-                tipos, ["FLOAT","VARCHAR","MONEY","BLOB"],
-                f"Tipos usados: {', '.join(tipos)}.", rng))
+                tipos,
+                [t for t in ["FLOAT","VARCHAR","MONEY","BLOB","CHAR"] if t not in tipos],
+                f"Tipos usados: {', '.join(tipos)}.",
+                f"Revisa las definiciones de columnas en script.sql. Los tipos que SÍ aparecen:\n" + ", ".join(tipos),
+                rng
+            ))
 
-        # Tablas con ON DELETE CASCADE
-        cascade_tablas = list(dict.fromkeys(re.findall(
-            r'CREATE TABLE\s+(\w+).*?ON DELETE CASCADE', sql[0].codigo, re.DOTALL | re.IGNORECASE)))
-        if cascade_tablas:
-            falsas_c = [t for t in tablas if t not in cascade_tablas]
-            banco.append(_rm(
-                "¿Cuáles tablas tienen FOREIGN KEY con ON DELETE CASCADE?",
-                cascade_tablas[:4], falsas_c[:4],
-                f"Tablas con CASCADE: {', '.join(cascade_tablas)}.", rng))
+    # columnas de una tabla
+    if sql_files:
+        for tabla in rng.sample(
+            list(dict.fromkeys(re.findall(r'CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(\w+)',
+                               sql_files[0].codigo, re.I))), min(4,14)):
+            patron = rf'CREATE TABLE\s+(?:IF NOT EXISTS\s+)?{tabla}\s*\((.*?)(?:CREATE TABLE|\Z)'
+            bloque = re.search(patron, sql_files[0].codigo, re.DOTALL|re.I)
+            if bloque:
+                cols = re.findall(r'^\s+(\w+)\s+\w+', bloque.group(1), re.M)
+                cols = [c for c in cols if c.upper() not in
+                        ('FOREIGN','PRIMARY','CONSTRAINT','UNIQUE','CHECK')]
+                if len(cols) >= 3:
+                    muestra = cols[:5]
+                    banco.append(_rm(
+                        f"¿Cuáles columnas pertenecen a la tabla '{tabla}'?",
+                        muestra,
+                        ["precio_total","codigo_barras","nombre_comercial","stock_minimo"],
+                        f"Columnas de {tabla}: {', '.join(cols)}.",
+                        f"Busca 'CREATE TABLE {tabla}' en script.sql. Las columnas correctas:\n" + "\n".join(muestra),
+                        rng
+                    ))
 
-    # imports Python (por archivo)
-    for pf in py:
-        imports = list(dict.fromkeys([
-            l.strip() for l in _novacias(pf.codigo)
-            if l.strip().startswith(("import ","from "))]))[:6]
-        if len(imports) >= 2:
-            banco.append(_rm(
-                f"¿Cuáles importaciones están en '{pf.titulo}'?",
-                imports[:4],
-                ["import pandas as pd","from django.db import models","import tensorflow"],
-                f"Imports reales en {pf.titulo}: {', '.join(imports)}.", rng))
-
-    # campos del alumno
-    campos = [f"{k}: {v}" for k, v in r.alumno.items()]
-    banco.append(_rm(
-        "¿Cuáles datos del alumno son correctos según la sección 1.1?",
-        campos, ["Nombre: John Doe","Email: fake@fake.com","Grupo: TSI00"],
-        "Los datos correctos están en la sección 1.1.", rng))
-
-    # bloques Jinja2 en HTML
-    for hf in html:
-        bloques = list(dict.fromkeys(re.findall(r'{%\s*block\s+(\w+)', hf.codigo)))
+    # bloques HTML
+    for a in html_files:
+        bloques = list(dict.fromkeys(re.findall(r'{%\s*block\s+(\w+)', a.codigo)))
         if len(bloques) >= 2:
             banco.append(_rm(
-                f"¿Cuáles bloques Jinja2 están en '{hf.titulo.split('/')[-1]}'?",
-                bloques[:4], ["sidebar","footer","meta","ads"],
-                f"Bloques reales: {', '.join(bloques)}.", rng))
+                f"¿Cuáles bloques Jinja2 están en '{a.titulo.split('/')[-1]}'?",
+                bloques[:4],
+                ["sidebar","footer","meta","ads","scripts_extra"],
+                f"Bloques reales en {a.titulo.split('/')[-1]}: {', '.join(bloques)}.",
+                f"Busca '{{% block %}}' en {a.titulo.split('/')[-1]}. Los bloques que SÍ existen:\n" + "\n".join(f"{{% block {b} %}}" for b in bloques[:4]),
+                rng
+            ))
 
-    # endpoints url_for en HTML
-    for hf in html:
-        endpoints = list(dict.fromkeys(re.findall(r"url_for\('([^']+)'", hf.codigo)))
-        if len(endpoints) >= 2:
+    # endpoints url_for
+    for a in html_files:
+        endpoints = list(dict.fromkeys(re.findall(r"url_for\('([^']+)'", a.codigo)))
+        if len(endpoints) >= 3:
+            muestra = endpoints[:5]
             banco.append(_rm(
-                f"¿Cuáles endpoints se usan con url_for en '{hf.titulo.split('/')[-1]}'?",
-                endpoints[:4], ["admin.panel","shop.cart","auth.register"],
-                f"Endpoints reales: {', '.join(endpoints)}.", rng))
+                f"¿Cuáles endpoints se usan con url_for en '{a.titulo.split('/')[-1]}'?",
+                muestra[:4],
+                ["admin.panel","shop.cart","auth.register","payment.confirm"],
+                f"Endpoints reales: {', '.join(endpoints)}.",
+                f"Busca url_for( en {a.titulo.split('/')[-1]}. Los endpoints correctos:\n" + "\n".join(f"url_for('{ep}')" for ep in muestra[:4]),
+                rng
+            ))
 
-    return banco
+    return _dedup(banco)
 
 
-# ── Banco de preguntas: Completar código ──────────────────────────────────────
+# ── BANCO COMPLETAR CÓDIGO ────────────────────────────────────────────────────
 
-PY_TARGETS = [
-    "Flask","Blueprint","render_template","redirect","url_for","session",
-    "request","flash","jsonify","abort","get_flashed_messages",
-    "psycopg2","RealDictCursor","get_conexion",
+PY_FLASK = [
+    "Flask","Blueprint","render_template","redirect","url_for",
+    "session","request","flash","jsonify","abort","g","current_app",
+    "psycopg2","RealDictCursor","get_conexion","wraps",
+    "cursor","fetchone","fetchall","execute","commit","rollback",
+    "session.get","session.pop","session.clear",
+    "request.form","request.files","request.method","request.args",
+    "request.json","request.get_json",
+    "app.route","bp.route","blueprint",
+    "os.environ","datetime","timedelta","uuid","json","base64",
+    "check_password_hash","generate_password_hash",
+    "login_required","make_response",
 ]
-PY_KW = ["def ","return ","from ","import ","if ","elif ","else:","try:","except ","with ","for "]
-SQL_TARGETS = [
-    "PRIMARY KEY","FOREIGN KEY","REFERENCES","NOT NULL","DEFAULT","CHECK",
-    "UNIQUE","INTEGER","TEXT","TIMESTAMP","DATE","ON DELETE CASCADE",
-    "ON UPDATE CASCADE","GENERATED ALWAYS AS IDENTITY","ON DELETE RESTRICT",
-    "ON DELETE SET NULL",
+PY_KW    = [
+    "def ","return ","from ","import ","if ","elif ","else:",
+    "try:","except ","with ","for ","while ","class ",
+    "raise ","yield ","lambda ","assert ","pass","break","continue",
+    "not ","and ","or ","in ","is ","None","True","False",
 ]
-HTML_TARGETS = ["extends","block","endblock","for","endfor","if","endif","url_for","with","endwith"]
-
-
-def _hacer_hueco(linea: str, target: str) -> tuple[str, str] | None:
-    if target not in linea:
-        return None
-    return linea.replace(target, "_____", 1), target
+SQL_KW   = [
+    "PRIMARY KEY","FOREIGN KEY","REFERENCES","NOT NULL","DEFAULT",
+    "CHECK","UNIQUE","INTEGER","TEXT","TIMESTAMP","DATE","BOOLEAN","REAL",
+    "ON DELETE CASCADE","ON UPDATE CASCADE","GENERATED ALWAYS AS IDENTITY",
+    "ON DELETE RESTRICT","ON DELETE SET NULL","CREATE TABLE","CREATE INDEX",
+    "INSERT INTO","VALUES","SELECT","WHERE","JOIN","LEFT JOIN","INNER JOIN",
+    "GROUP BY","ORDER BY","HAVING","LIMIT","OFFSET","RETURNING",
+    "AT TIME ZONE","STRING_AGG","COUNT","SUM","AVG","MAX","MIN",
+]
+HTML_KW  = ["extends","block","endblock","for","endfor","if","endif","url_for",
+            "with","endwith","set","include","macro","call","filter"]
 
 
 def _banco_cc(r: ResultadoValidacion, rng: random.Random) -> list[CompletarCodigo]:
-    banco: list[CompletarCodigo] = []
-    py   = _by_ext(r.archivos, "py")
-    sql  = _by_ext(r.archivos, "sql")
-    html = _by_ext(r.archivos, "html")
-
+    banco = []
+    py_files  = _py(r.archivos)
+    sql_files = _sql(r.archivos)
+    html_files= _html(r.archivos)
     vistos: set[str] = set()
 
-    # ── Python: librerías/funciones Flask ────────────────────────────────────
-    for pf in py:
-        lineas = _novacias(pf.codigo)
+    # Python Flask/librerías
+    for a in py_files:
+        lineas = _novacias(a.codigo)
         rng.shuffle(lineas)
-        for linea in lineas:
-            if len(linea.strip()) > 100 or linea.strip() in vistos:
-                continue
-            for t in PY_TARGETS:
-                if t in linea.strip():
-                    hueco, resp = linea.replace(t, "_____", 1), t
-                    vistos.add(linea.strip())
-                    banco.append(CompletarCodigo(
-                        instruccion=f"Completa la línea de '{pf.titulo}':",
-                        codigo_con_huecos=hueco.strip(),
-                        respuestas=[resp],
-                        explicacion=f"Línea original: {linea.strip()}"))
+        for l in lineas:
+            ls = l.strip()
+            if len(ls) > 100 or ls in vistos: continue
+            for t in PY_FLASK:
+                if t in ls:
+                    vistos.add(ls)
+                    banco.append(_cc(
+                        f"Completa la línea de '{a.titulo}':",
+                        ls, t,
+                        f"Línea original: {ls}",
+                        f"La palabra que falta es '{t}'. Está en {a.titulo}:\n{ls}",
+                    ))
                     break
 
-    # ── Python: keywords ─────────────────────────────────────────────────────
-    for pf in py:
-        lineas = _novacias(pf.codigo)
+    # Python keywords
+    for a in py_files:
+        lineas = _novacias(a.codigo)
         rng.shuffle(lineas)
-        for linea in lineas:
-            if len(linea.strip()) > 80 or linea.strip() in vistos:
-                continue
+        for l in lineas:
+            ls = l.strip()
+            if len(ls) > 80 or ls in vistos: continue
             for t in PY_KW:
-                if linea.strip().startswith(t) and len(linea.strip()) > len(t) + 3:
-                    hueco = t.replace(t, "_____", 1) + linea.strip()[len(t):]
-                    vistos.add(linea.strip())
-                    banco.append(CompletarCodigo(
-                        instruccion=f"Completa la instrucción en '{pf.titulo}':",
-                        codigo_con_huecos=hueco,
-                        respuestas=[t.strip()],
-                        explicacion=f"Línea original: {linea.strip()}"))
+                if ls.startswith(t) and len(ls) > len(t)+3:
+                    vistos.add(ls)
+                    banco.append(_cc(
+                        f"Completa la instrucción en '{a.titulo}':",
+                        ls, t,
+                        f"Línea original: {ls}",
+                        f"La palabra clave que falta es '{t.strip()}'. La línea completa es:\n{ls}",
+                    ))
                     break
 
-    # ── SQL ───────────────────────────────────────────────────────────────────
-    for pf in sql:
-        lineas = _novacias(pf.codigo)
+    # SQL
+    for a in sql_files:
+        lineas = _novacias(a.codigo)
         rng.shuffle(lineas)
-        for linea in lineas:
-            if len(linea.strip()) > 90 or linea.strip() in vistos:
-                continue
-            for t in SQL_TARGETS:
-                if t.lower() in linea.lower():
-                    hueco = re.sub(re.escape(t), "_____", linea.strip(), count=1, flags=re.IGNORECASE)
-                    vistos.add(linea.strip())
+        for l in lineas:
+            ls = l.strip()
+            if len(ls) > 90 or ls in vistos or ls.startswith('--'): continue
+            for t in SQL_KW:
+                if t.lower() in ls.lower():
+                    hueco = re.sub(re.escape(t), "_____", ls, count=1, flags=re.I)
+                    if hueco == ls: continue
+                    vistos.add(ls)
                     banco.append(CompletarCodigo(
-                        instruccion=f"Completa la línea SQL de '{pf.titulo}':",
+                        instruccion=f"Completa la línea SQL de '{a.titulo}':",
                         codigo_con_huecos=hueco,
                         respuestas=[t],
-                        explicacion=f"Línea original: {linea.strip()}"))
+                        explicacion=f"Línea original: {ls}",
+                        retroalimentacion=f"La palabra SQL que falta es '{t}'. La línea completa es:\n{ls}",
+                    ))
                     break
 
-    # ── HTML / Jinja2 ─────────────────────────────────────────────────────────
-    for hf in html:
-        lineas = _novacias(hf.codigo)
+    # Jinja2 / HTML
+    for a in html_files:
+        lineas = _novacias(a.codigo)
         rng.shuffle(lineas)
-        for linea in lineas:
-            if len(linea.strip()) > 120 or linea.strip() in vistos:
-                continue
-            for t in HTML_TARGETS:
-                pattern = r'\{%-?\s*' + re.escape(t) + r'[\s%]'
-                if re.search(pattern, linea, re.IGNORECASE):
-                    hueco = re.sub(re.escape(t), "_____", linea.strip(), count=1)
-                    vistos.add(linea.strip())
+        for l in lineas:
+            ls = l.strip()
+            if len(ls) > 120 or ls in vistos: continue
+            for t in HTML_KW:
+                pattern = r'\{%-?\s*' + re.escape(t) + r'[\s%{]'
+                if re.search(pattern, ls, re.I):
+                    hueco = re.sub(re.escape(t), "_____", ls, count=1)
+                    if hueco == ls: continue
+                    vistos.add(ls)
                     banco.append(CompletarCodigo(
-                        instruccion=f"Completa la directiva Jinja2 en '{hf.titulo.split('/')[-1]}':",
+                        instruccion=f"Completa la directiva Jinja2 en '{a.titulo.split('/')[-1]}':",
                         codigo_con_huecos=hueco,
                         respuestas=[t],
-                        explicacion=f"Línea original: {linea.strip()}"))
+                        explicacion=f"Línea original: {ls}",
+                        retroalimentacion=f"La directiva Jinja2 que falta es '{t}'. La línea completa es:\n{ls}",
+                    ))
                     break
 
-    return banco
+    return _dedup(banco)
 
 
 # ── Generadores finales ────────────────────────────────────────────────────────
 
-def gen_opcion_multiple(r: ResultadoValidacion, n=20, seed=42) -> list[OpcionMultiple]:
+def gen_opcion_multiple(r, n=40, seed=42):
     rng = random.Random(seed)
     banco = _banco_om(r, rng)
     rng.shuffle(banco)
     return banco[:n]
 
-def gen_respuesta_multiple(r: ResultadoValidacion, n=15, seed=42) -> list[RespuestaMultiple]:
+def gen_respuesta_multiple(r, n=40, seed=42):
     rng = random.Random(seed)
     banco = _banco_rm(r, rng)
     rng.shuffle(banco)
     return banco[:n]
 
-def gen_completar_codigo(r: ResultadoValidacion, n=15, seed=42) -> list[CompletarCodigo]:
+def gen_completar_codigo(r, n=40, seed=42):
     rng = random.Random(seed)
     banco = _banco_cc(r, rng)
     rng.shuffle(banco)
     return banco[:n]
 
-def gen_combinado(r: ResultadoValidacion, n=20, seed=42) -> list[Pregunta]:
+def gen_combinado(r, n=40, seed=42):
     rng = random.Random(seed)
-    om  = gen_opcion_multiple(r, 7, seed)
-    rm  = gen_respuesta_multiple(r, 7, seed)
-    cc  = gen_completar_codigo(r, 6, seed)
-    mezclado: list[Pregunta] = om + rm + cc
+    om  = gen_opcion_multiple(r, 14, seed)
+    rm  = gen_respuesta_multiple(r, 13, seed)
+    cc  = gen_completar_codigo(r, 13, seed)
+    mezclado = om + rm + cc
     rng.shuffle(mezclado)
     return mezclado[:n]
 
 
-DURACIONES = {
-    "opcion_multiple":    40,
-    "respuesta_multiple": 40,
-    "completar_codigo":   40,
-    "combinado":          40,
-}
-
 TITULOS = {
     "opcion_multiple":    ("Examen de opción múltiple",    "Selecciona la única respuesta correcta en cada pregunta."),
     "respuesta_multiple": ("Examen de respuesta múltiple", "Puede haber más de una respuesta correcta por pregunta."),
-    "completar_codigo":   ("Examen de completar código",   "Escribe la palabra o instrucción que va en cada hueco (_____)." ),
+    "completar_codigo":   ("Examen de completar código",   "Escribe la palabra o instrucción que va en cada hueco (_____)."),
     "combinado":          ("Examen combinado",              "Mezcla de opción múltiple, respuesta múltiple y completar código."),
 }
 
-def generar_examen(r: ResultadoValidacion, tipo: str, seed=42) -> Examen:
+def generar_examen(r: ResultadoValidacion, tipo: str, seed=42):
     titulo, desc = TITULOS.get(tipo, ("Examen",""))
     gens = {
-        "opcion_multiple":    lambda: gen_opcion_multiple(r, 20, seed),
-        "respuesta_multiple": lambda: gen_respuesta_multiple(r, 15, seed),
-        "completar_codigo":   lambda: gen_completar_codigo(r, 15, seed),
-        "combinado":          lambda: gen_combinado(r, 20, seed),
+        "opcion_multiple":    lambda: gen_opcion_multiple(r, 40, seed),
+        "respuesta_multiple": lambda: gen_respuesta_multiple(r, 40, seed),
+        "completar_codigo":   lambda: gen_completar_codigo(r, 40, seed),
+        "combinado":          lambda: gen_combinado(r, 40, seed),
     }
+    from examenes import Examen
     return Examen(titulo=titulo, descripcion=desc, tipo=tipo,
-                  duracion_minutos=DURACIONES[tipo],
-                  preguntas=gens[tipo]())
+                  duracion_minutos=40, preguntas=gens[tipo]())
