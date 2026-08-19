@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Detalle · Validador</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+.vd-header{ background:linear-gradient(135deg,#182620,#1C2E44); color:#EFF5F1; padding:32px 28px 44px; }
+.vd-header h1{ font-family:'Space Grotesk',sans-serif; font-size:22px; margin:0 0 4px; color:#EFF5F1; }
+.vd-header p{ color:#B7C4BC; font-size:13.5px; margin:0; }
+.vd-page{ max-width:900px; margin:-24px auto 0; padding:0 24px 60px; }
+.vd-sub-title{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3); font-weight:600; margin-top:16px; margin-bottom:8px; }
+</style>
+</head>
+<body>
+
+<div class="v-topbar">
+  <div class="v-topbar-brand">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+    Validador
+  </div>
+  <div class="v-topbar-user">
+    <strong>{{ nombre.split()[0] }}</strong>
+    <a href="{{ url_for('logout') }}" class="v-btn-logout">Cerrar sesión</a>
+  </div>
+</div>
+
+<div class="vd-header">
+  <div style="max-width:900px;margin:0 auto;">
+    <a href="{{ url_for('dashboard') }}" class="v-back-link">← Regresar al inicio</a>
+    <h1>Detalle del archivo</h1>
+    <p>{{ nombre_archivo }}</p>
+  </div>
+</div>
+
+<div class="vd-page">
+
+  <!-- Stamp -->
+  <div class="v-stamp {{ resultado.estado }}" style="margin-top:0;">
+    <div class="v-stamp-badge">
+      {% if resultado.estado == 'ok' %}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+      {% elif resultado.estado == 'warn' %}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="8" x2="12" y2="13"></line><circle cx="12" cy="16.5" r=".6" fill="currentColor"></circle></svg>
+      {% else %}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      {% endif %}
+    </div>
+    <div class="v-stamp-txt">
+      <strong>
+        {% if resultado.estado == 'ok' %}Estructura completa ✓
+        {% elif resultado.estado == 'warn' %}Casi completa
+        {% else %}Faltan secciones importantes{% endif %}
+      </strong>
+      <span>{{ resultado.resumen }}</span>
+    </div>
+  </div>
+
+  <!-- Checklist -->
+  <div class="v-card">
+    <div class="v-card-title">Lista de verificación</div>
+    <p class="v-card-sub">Secciones esperadas en el archivo.</p>
+    <div class="v-check-grid">
+      {% for item in resultado.checklist %}
+      <div class="v-check-item {{ 'pass' if item.ok else 'fail' }}">
+        <div class="dot">{{ '✓' if item.ok else '✕' }}</div>
+        <div><div>{{ item.label }}</div><span class="hint">{{ item.detalle }}</span></div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Datos alumno -->
+  <div class="v-card">
+    <div class="v-card-title">Datos del alumno</div>
+    <p class="v-card-sub">Sección 1.1</p>
+    <div class="v-field-grid">
+      {% for campo in resultado.CAMPOS_ALUMNO_ESPERADOS %}
+      <div class="v-field">
+        <div class="k">{{ campo }}</div>
+        {% if resultado.alumno.get(campo) %}
+          <div class="v">{{ resultado.alumno[campo] }}</div>
+        {% else %}
+          <div class="v empty">No encontrado</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Datos proyecto -->
+  <div class="v-card">
+    <div class="v-card-title">Datos del proyecto</div>
+    <p class="v-card-sub">Sección 1.2</p>
+    <div class="v-field-grid">
+      <div class="v-field">
+        <div class="k">Nombre</div>
+        <div class="v {{ '' if resultado.proyecto_nombre else 'empty' }}">{{ resultado.proyecto_nombre or 'No encontrado' }}</div>
+      </div>
+      <div class="v-field">
+        <div class="k">Objetivo</div>
+        <div class="v {{ '' if resultado.proyecto_objetivo else 'empty' }}">{{ resultado.proyecto_objetivo or 'No encontrado' }}</div>
+      </div>
+    </div>
+    {% if resultado.modulos %}
+    <div class="vd-sub-title">Módulos</div>
+    <ul class="v-modulos-list">
+      {% for mod in resultado.modulos %}
+      <li><span class="num">{{ mod.numero }}</span>{{ mod.texto }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+
+  <!-- Estructura -->
+  <div class="v-card">
+    <div class="v-card-title">Estructura del proyecto</div>
+    <p class="v-card-sub">Sección 2.1</p>
+    {% if resultado.estructura %}
+      <div class="v-tree-box">{{ resultado.estructura }}</div>
+    {% else %}
+      <div style="color:var(--text-3);font-style:italic;font-size:13.5px;">No se encontró árbol de carpetas.</div>
+    {% endif %}
+  </div>
+
+  <!-- Archivos -->
+  <div class="v-card">
+    <div class="v-card-title">Archivos de código fuente</div>
+    <p class="v-card-sub">{{ resultado.archivos|length }} archivo(s) detectado(s)</p>
+    {% for archivo in resultado.archivos %}
+    <details class="v-file-item">
+      <summary class="v-file-head">
+        <div class="left">
+          <svg class="v-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          <span class="v-fname">{{ archivo.titulo }}</span>
+          <span class="v-lang-pill">{{ archivo.lenguaje or 'text' }}</span>
+        </div>
+        <span class="v-line-count">{{ archivo.lineas }} líneas</span>
+      </summary>
+      <pre class="v-file-pre">{{ archivo.codigo }}</pre>
+    </details>
+    {% endfor %}
+  </div>
+
+  <!-- Exámenes -->
+  {% if resultado.archivos %}
+  <div class="v-card">
+    <div class="v-card-title">Presentar examen</div>
+    <p class="v-card-sub">Las preguntas se generan a partir de este archivo.</p>
+    <div class="v-exam-grid">
+      <a href="{{ url_for('examen', tipo='opcion_multiple') }}" class="v-exam-btn">
+        <span class="v-eb-icon">🔘</span>
+        <span class="v-eb-label">Opción múltiple</span>
+        <span class="v-eb-sub">20 preguntas · 40 min</span>
+      </a>
+      <a href="{{ url_for('examen', tipo='respuesta_multiple') }}" class="v-exam-btn">
+        <span class="v-eb-icon">☑️</span>
+        <span class="v-eb-label">Respuesta múltiple</span>
+        <span class="v-eb-sub">15 preguntas · 40 min</span>
+      </a>
+      <a href="{{ url_for('examen', tipo='completar_codigo') }}" class="v-exam-btn">
+        <span class="v-eb-icon">⌨️</span>
+        <span class="v-eb-label">Completar código</span>
+        <span class="v-eb-sub">15 huecos · 40 min</span>
+      </a>
+      <a href="{{ url_for('examen', tipo='combinado') }}" class="v-exam-btn dest">
+        <span class="v-eb-icon">🔀</span>
+        <span class="v-eb-label">Combinado</span>
+        <span class="v-eb-sub">20 preguntas · 40 min</span>
+      </a>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+</body>
+</html>

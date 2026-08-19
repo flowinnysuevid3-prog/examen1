@@ -3,123 +3,97 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Resultado · {{ examen.titulo }}</title>
+<title>Resultado · Validador</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <style>
-  .res-hero{ padding:36px 24px 48px; color:#EFF5F1; }
-  .res-hero.ok{ background:linear-gradient(135deg,#144F3C,#1a5045); }
-  .res-hero.warn{ background:linear-gradient(135deg,#7A521F,#8a6030); }
-  .res-hero.bad{ background:linear-gradient(135deg,#7A2529,#8a3030); }
-  .res-hero h1{ font-family:'Space Grotesk',sans-serif; font-size:28px; margin:0 0 4px; }
-  .score-big{ font-size:72px; font-weight:700; font-family:'Space Grotesk',sans-serif; line-height:1; margin:12px 0 4px; }
-  .score-sub{ font-size:15px; opacity:.8; }
-  .score-label{ font-size:13px; opacity:.65; margin-top:4px; font-family:'JetBrains Mono',monospace; }
-
-  .q-card{ background:#fff; border:1px solid #DFE4DC; border-radius:16px; padding:22px; margin-bottom:14px; }
-  .q-card.ok-card{ border-left:4px solid #1F7A5C; }
-  .q-card.fail-card{ border-left:4px solid #B4373B; }
-  .q-num{ font-size:11px; font-family:'JetBrains Mono',monospace; color:#8A938A; font-weight:600; text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; display:flex; align-items:center; gap:8px; }
-  .tick{ display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; font-size:10px; }
-  .tick.ok{ background:#E4F1EA; color:#144F3C; }
-  .tick.fail{ background:#FBEAEA; color:#B4373B; }
-  .q-texto{ font-size:15px; font-weight:600; color:#1B211D; margin-bottom:14px; line-height:1.4; font-family:'Space Grotesk',sans-serif; }
-
-  .opciones-res{ display:flex; flex-direction:column; gap:6px; }
-  .op-res{ padding:9px 12px; border-radius:8px; font-size:13.5px; border:1.5px solid #DFE4DC; }
-  .op-res.es-correcta{ background:#E4F1EA; border-color:#BFE0CF; color:#144F3C; font-weight:600; }
-  .op-res.es-seleccionada-mal{ background:#FBEAEA; border-color:#F0C3C3; color:#7A2529; }
-  .op-res.es-correcta.es-seleccionada{ background:#E4F1EA; border-color:#1F7A5C; }
-
-  .codigo-hueco{ background:#141B17; color:#DCE6DF; border-radius:10px; padding:14px; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.7; margin-bottom:10px; white-space:pre-wrap; }
-  .resp-row{ display:flex; gap:10px; margin-top:8px; flex-wrap:wrap; }
-  .resp-chip{ padding:5px 12px; border-radius:999px; font-size:12.5px; font-family:'JetBrains Mono',monospace; }
-  .resp-chip.ok{ background:#E4F1EA; color:#144F3C; }
-  .resp-chip.fail{ background:#FBEAEA; color:#7A2529; }
-
-  .explicacion{ font-size:13px; color:#5B655D; margin-top:12px; padding:10px 12px; background:#F5F7F4; border-radius:8px; }
-
-  .btn-volver{ display:inline-flex; align-items:center; gap:6px; color:#fff; background:#144F3C; padding:10px 20px; border-radius:999px; text-decoration:none; font-size:14px; font-weight:600; margin-top:8px; }
-  .btn-otro{ display:inline-flex; align-items:center; gap:6px; color:#144F3C; border:2px solid #144F3C; padding:10px 20px; border-radius:999px; text-decoration:none; font-size:14px; font-weight:600; margin-top:8px; margin-left:8px; }
+.rr-page{ max-width:820px; margin:-24px auto 0; padding:0 24px 60px; }
 </style>
 </head>
 <body>
 
-{% set pct = calificacion %}
-{% set clase_hero = 'ok' if pct >= 70 else ('warn' if pct >= 40 else 'bad') %}
+<div class="v-topbar">
+  <div class="v-topbar-brand">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+    Validador
+  </div>
+  <div class="v-topbar-user">
+    <strong>{{ nombre.split()[0] }}</strong>
+    <a href="{{ url_for('logout') }}" class="v-btn-logout">Cerrar sesión</a>
+  </div>
+</div>
 
-<div class="res-hero {{ clase_hero }}">
-  <div class="hero-inner" style="max-width:800px; margin:0 auto;">
-    <div style="font-size:13px; opacity:.7; font-family:'JetBrains Mono',monospace; margin-bottom:8px;">{{ nombre }}</div>
-    <h1>{{ examen.titulo }}</h1>
-    <div class="score-big">{{ calificacion }}%</div>
-    <div class="score-sub">{{ correctas }} de {{ total }} respuestas correctas</div>
-    <div style="margin-top:14px;">
-      <a class="btn-volver" href="{{ url_for('index') }}">← Volver al inicio</a>
-      <a class="btn-otro" href="{{ url_for('examen', tipo=examen.tipo) }}" style="color:#fff; border-color:rgba(255,255,255,.5);">Repetir examen</a>
-      <a class="btn-otro" href="{{ url_for('historial') }}" style="color:#fff;border-color:rgba(255,255,255,.5);">Ver historial</a>
-      {% if guardado %}<span style="font-size:12px;opacity:.7;display:block;margin-top:8px;">✓ Resultado guardado en la base de datos</span>{% endif %}
+{% set clase = 'ok' if calificacion >= 70 else ('warn' if calificacion >= 40 else 'bad') %}
+<div class="v-res-hero {{ clase }}">
+  <div style="max-width:820px;margin:0 auto;">
+    <a href="{{ url_for('dashboard') }}" class="v-back-link">← Regresar al inicio</a>
+    <div class="v-res-score">{{ calificacion }}%</div>
+    <div class="v-res-label">{{ correctas }} de {{ total }} correctas · {{ examen.titulo }}</div>
+    <div class="v-res-sub">
+      {% if calificacion >= 70 %}¡Buen trabajo! Sigue así.
+      {% elif calificacion >= 40 %}Puedes mejorar — repasa las preguntas en rojo.
+      {% else %}Repasa tu archivo .md con calma e inténtalo de nuevo.{% endif %}
+    </div>
+    <div class="v-btn-row">
+      <a href="{{ url_for('dashboard') }}" class="v-btn-hero solid">← Ir al inicio</a>
+      <a href="{{ url_for('examen', tipo=examen.tipo) }}" class="v-btn-hero">Repetir examen</a>
+      <a href="{{ url_for('validar_detalle') }}" class="v-btn-hero">Ver mi archivo</a>
     </div>
   </div>
 </div>
 
-<div class="wrap" style="max-width:800px;">
-
-  {% for i, d in detalle|enumerate %}
-  <div class="q-card {{ 'ok-card' if d.ok else 'fail-card' }}">
-    <div class="q-num">
-      <span class="tick {{ 'ok' if d.ok else 'fail' }}">{{ '✓' if d.ok else '✕' }}</span>
+<div class="rr-page">
+  {% for i, d in detalle %}
+  <div class="v-q-res-card {{ 'ok-card' if d.ok else 'fail-card' }}">
+    <div class="v-q-num">
+      <span class="v-tick {{ 'ok' if d.ok else 'fail' }}">{{ '✓' if d.ok else '✕' }}</span>
       Pregunta {{ i+1 }}
     </div>
 
     {% if d.tipo == 'opcion_multiple' %}
-      <div class="q-texto">{{ d.pregunta }}</div>
-      <div class="opciones-res">
+      <div class="v-q-texto">{{ d.pregunta }}</div>
+      <div class="v-opciones">
         {% for j, op in d.opciones|enumerate %}
-        <div class="op-res
-          {% if j == d.correcta %}es-correcta{% endif %}
-          {% if j == d.seleccionada and j != d.correcta %}es-seleccionada-mal{% endif %}
-          {% if j == d.seleccionada and j == d.correcta %}es-seleccionada{% endif %}
-        ">
+        <div class="v-op-res
+          {% if j == d.correcta %}correcta{% endif %}
+          {% if j == d.seleccionada and j != d.correcta %}mal{% endif %}">
           {% if j == d.correcta %}✓ {% elif j == d.seleccionada %}✕ {% endif %}{{ op }}
         </div>
         {% endfor %}
       </div>
 
     {% elif d.tipo == 'respuesta_multiple' %}
-      <div class="q-texto">{{ d.pregunta }}</div>
-      <div class="opciones-res">
+      <div class="v-q-texto">{{ d.pregunta }}</div>
+      <div class="v-opciones">
         {% for j, op in d.opciones|enumerate %}
-        <div class="op-res
-          {% if j in d.correctas %}es-correcta{% endif %}
-          {% if j in d.seleccionadas and j not in d.correctas %}es-seleccionada-mal{% endif %}
-        ">
+        <div class="v-op-res
+          {% if j in d.correctas %}correcta{% endif %}
+          {% if j in d.seleccionadas and j not in d.correctas %}mal{% endif %}">
           {% if j in d.correctas %}✓ {% elif j in d.seleccionadas %}✕ {% endif %}{{ op }}
         </div>
         {% endfor %}
       </div>
 
     {% elif d.tipo == 'completar_codigo' %}
-      <div class="q-texto">{{ d.instruccion }}</div>
-      <div class="codigo-hueco">{{ d.codigo_con_huecos }}</div>
-      <div class="resp-row">
+      <div class="v-q-texto">{{ d.instruccion }}</div>
+      <div class="v-codigo-hueco">{{ d.codigo_con_huecos }}</div>
+      <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;">
         <div>
-          <span style="font-size:12px; color:#8A938A;">Tu respuesta:</span><br>
-          <span class="resp-chip {{ 'ok' if d.ok else 'fail' }}">{{ d.respuesta_usuario or '(sin respuesta)' }}</span>
+          <div class="v-resp-label">Tu respuesta</div>
+          <span class="v-resp-chip {{ 'ok' if d.ok else 'fail' }}">{{ d.respuesta_usuario or '(sin respuesta)' }}</span>
         </div>
         {% if not d.ok %}
         <div>
-          <span style="font-size:12px; color:#8A938A;">Respuesta correcta:</span><br>
-          <span class="resp-chip ok">{{ d.respuesta_correcta }}</span>
+          <div class="v-resp-label">Respuesta correcta</div>
+          <span class="v-resp-chip ok">{{ d.respuesta_correcta }}</span>
         </div>
         {% endif %}
       </div>
     {% endif %}
 
-    <div class="explicacion">💡 {{ d.explicacion }}</div>
+    <div class="v-explicacion">💡 {{ d.explicacion }}</div>
   </div>
   {% endfor %}
-
 </div>
 </body>
 </html>

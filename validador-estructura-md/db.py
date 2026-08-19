@@ -1,8 +1,5 @@
 """
 db.py — Conexión a Supabase (PostgreSQL) para guardar resultados.
-Usa psycopg2 igual que Flowi, con la misma convención de get_conexion().
-Si no hay DATABASE_URL configurada, las operaciones se omiten silenciosamente
-(el examen funciona aunque no haya BD).
 """
 import os
 import psycopg2
@@ -24,11 +21,8 @@ def guardar_resultado(
     total: int,
     correctas: int,
     calificacion: int,
+    matricula: str = None,
 ) -> bool:
-    """
-    Inserta un resultado en la tabla resultado_examen.
-    Devuelve True si se guardó, False si no hay BD o hubo error.
-    """
     conn = None
     try:
         conn = get_conexion()
@@ -39,8 +33,8 @@ def guardar_resultado(
                 INSERT INTO resultado_examen
                     (nombre_archivo, alumno_nombre, alumno_email,
                      alumno_grupo, proyecto_nombre, tipo_examen,
-                     total_preguntas, correctas, calificacion)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     total_preguntas, correctas, calificacion, matricula)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 nombre_archivo,
                 alumno.get("Nombre", "") + " " + alumno.get("Primer Apellido", ""),
@@ -51,6 +45,7 @@ def guardar_resultado(
                 total,
                 correctas,
                 calificacion,
+                matricula,
             ))
         conn.commit()
         return True
@@ -58,12 +53,10 @@ def guardar_resultado(
         print(f"[db] Error al guardar resultado: {e}")
         return False
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
-def ultimos_resultados(limite: int = 20) -> list[dict]:
-    """Devuelve los últimos N resultados para la página de historial."""
+def ultimos_resultados(limite: int = 50) -> list[dict]:
     conn = None
     try:
         conn = get_conexion()
@@ -84,5 +77,4 @@ def ultimos_resultados(limite: int = 20) -> list[dict]:
         print(f"[db] Error al leer resultados: {e}")
         return []
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()

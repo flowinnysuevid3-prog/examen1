@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inicio · Validador</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+.db-hero{
+  background:linear-gradient(135deg,#182620 0%,#1C2E44 100%);
+  color:#EFF5F1; padding:40px 28px 52px;
+}
+.db-hero h1{ font-family:'Space Grotesk',sans-serif; font-size:26px; margin:0 0 6px; font-weight:600; color:#EFF5F1; }
+.db-hero p{ color:#B7C4BC; font-size:14px; margin:0; }
+.db-page{ max-width:960px; margin:-28px auto 0; padding:0 24px 60px; }
+.db-section-title{
+  font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:600;
+  color:var(--text); margin:0 0 12px; display:flex; align-items:center; gap:8px;
+}
+.db-section-sub{ font-size:13px; color:var(--text-3); font-weight:400; font-family:'Inter',sans-serif; }
+</style>
+</head>
+<body>
+
+<!-- Topbar -->
+<div class="v-topbar">
+  <div class="v-topbar-brand">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+    Validador
+  </div>
+  <div class="v-topbar-user">
+    Hola, <strong>{{ nombre.split()[0] }}</strong>
+    <a href="{{ url_for('logout') }}" class="v-btn-logout">Cerrar sesión</a>
+  </div>
+</div>
+
+<!-- Hero -->
+<div class="db-hero">
+  <div style="max-width:960px;margin:0 auto;">
+    <h1>Bienvenido, {{ nombre.split()[0] }} 👋</h1>
+    <p>Sube tu archivo .md, valídalo y presenta tu examen desde aquí.</p>
+  </div>
+</div>
+
+<div class="db-page">
+
+  {% with msgs = get_flashed_messages() %}
+    {% if msgs %}<div class="v-flash">{{ msgs[0] }}</div>{% endif %}
+  {% endwith %}
+
+  <!-- Stats (solo si ya tiene exámenes) -->
+  {% if stats.total > 0 %}
+  <div class="v-stats-row">
+    <div class="v-stat">
+      <div class="v-stat-n">{{ stats.total }}</div>
+      <div class="v-stat-l">Exámenes</div>
+    </div>
+    <div class="v-stat">
+      <div class="v-stat-n {% if stats.promedio < 40 %}bad{% elif stats.promedio < 70 %}warn{% endif %}">{{ stats.promedio }}%</div>
+      <div class="v-stat-l">Promedio</div>
+    </div>
+    <div class="v-stat">
+      <div class="v-stat-n">{{ stats.mejor }}%</div>
+      <div class="v-stat-l">Mejor nota</div>
+    </div>
+    {% if stats.ultimo is not none %}
+    <div class="v-stat">
+      <div class="v-stat-n {% if stats.ultimo < 40 %}bad{% elif stats.ultimo < 70 %}warn{% endif %}">{{ stats.ultimo }}%</div>
+      <div class="v-stat-l">Último examen</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Recomendación -->
+  <div class="v-rec">
+    <div class="v-rec-icon">💡</div>
+    <div class="v-rec-body">
+      <strong>Lo que debes repasar</strong>
+      <p>{{ recomendacion }}</p>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Validador inline -->
+  <div class="v-card">
+    <div class="db-section-title">
+      Validar mi archivo .md
+      <span class="db-section-sub">· el resultado aparece aquí mismo</span>
+    </div>
+
+    <form method="post" enctype="multipart/form-data">
+      <label class="v-dropzone" for="fileInput">
+        <div class="v-dz-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+        </div>
+        <div class="v-dz-main" id="dzTxt">
+          {% if nombre_archivo %}{{ nombre_archivo }}{% else %}Selecciona o arrastra tu .md{% endif %}
+        </div>
+        <div class="v-dz-sub">Máximo 5 MB · se procesa en el servidor</div>
+      </label>
+      <input type="file" name="archivo" id="fileInput" accept=".md,.markdown,text/plain">
+
+      <div class="v-toggle-paste">
+        <button type="button" id="togglePaste">O pega el contenido directamente</button>
+      </div>
+      <textarea name="contenido" id="pasteArea" class="v-textarea" placeholder="Pega aquí el contenido de tu archivo .md..."></textarea>
+
+      <button type="submit" class="v-btn-primary" style="margin-top:14px;">Validar estructura</button>
+    </form>
+  </div>
+
+  <!-- Resultado de validación -->
+  {% if resultado %}
+  <div class="v-card">
+    <div class="v-stamp {{ resultado.estado }}">
+      <div class="v-stamp-badge">
+        {% if resultado.estado == 'ok' %}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        {% elif resultado.estado == 'warn' %}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="8" x2="12" y2="13"></line><circle cx="12" cy="16.5" r=".6" fill="currentColor"></circle></svg>
+        {% else %}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        {% endif %}
+      </div>
+      <div class="v-stamp-txt">
+        <strong>
+          {% if resultado.estado == 'ok' %}Estructura completa ✓
+          {% elif resultado.estado == 'warn' %}Casi completa — revisa los puntos en rojo
+          {% else %}Faltan secciones importantes{% endif %}
+        </strong>
+        <span>{{ resultado.resumen }}</span>
+      </div>
+    </div>
+
+    <div class="v-check-grid">
+      {% for item in resultado.checklist %}
+      <div class="v-check-item {{ 'pass' if item.ok else 'fail' }}">
+        <div class="dot">{{ '✓' if item.ok else '✕' }}</div>
+        <div>
+          <div>{{ item.label }}</div>
+          <span class="hint">{{ item.detalle }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <a href="{{ url_for('validar_detalle') }}" class="v-btn-outline">
+      Ver detalle completo del archivo →
+    </a>
+  </div>
+
+  <!-- Exámenes -->
+  {% if resultado.archivos %}
+  <div class="v-card">
+    <div class="db-section-title">Presentar examen</div>
+    <div class="v-exam-grid">
+      <a href="{{ url_for('examen', tipo='opcion_multiple') }}" class="v-exam-btn">
+        <span class="v-eb-icon">🔘</span>
+        <span class="v-eb-label">Opción múltiple</span>
+        <span class="v-eb-sub">20 preguntas · 40 min</span>
+      </a>
+      <a href="{{ url_for('examen', tipo='respuesta_multiple') }}" class="v-exam-btn">
+        <span class="v-eb-icon">☑️</span>
+        <span class="v-eb-label">Respuesta múltiple</span>
+        <span class="v-eb-sub">15 preguntas · 40 min</span>
+      </a>
+      <a href="{{ url_for('examen', tipo='completar_codigo') }}" class="v-exam-btn">
+        <span class="v-eb-icon">⌨️</span>
+        <span class="v-eb-label">Completar código</span>
+        <span class="v-eb-sub">15 huecos · 40 min</span>
+      </a>
+      <a href="{{ url_for('examen', tipo='combinado') }}" class="v-exam-btn dest">
+        <span class="v-eb-icon">🔀</span>
+        <span class="v-eb-label">Combinado</span>
+        <span class="v-eb-sub">20 preguntas · 40 min</span>
+      </a>
+    </div>
+  </div>
+  {% endif %}
+  {% endif %}
+
+  <!-- Historial -->
+  <div class="v-card" style="padding:0;overflow:hidden;">
+    <div style="padding:16px 20px;border-bottom:1px solid var(--border);">
+      <div class="db-section-title" style="margin:0;">Mis exámenes presentados</div>
+    </div>
+    {% if historial %}
+    <table class="v-table">
+      <thead>
+        <tr>
+          <th>Archivo</th><th>Tipo</th><th>Resultado</th><th>Calificación</th><th>Fecha</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for res in historial %}
+        <tr>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:11.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ res.nombre_archivo }}</td>
+          <td><span class="v-tipo-chip">{{ res.tipo_examen.replace('_',' ') }}</span></td>
+          <td style="color:var(--text-2);">{{ res.correctas }} / {{ res.total_preguntas }}</td>
+          <td>
+            {% set c = res.calificacion %}
+            <span class="v-pill {% if c >= 70 %}ok{% elif c >= 40 %}med{% else %}bad{% endif %}">{{ c }}%</span>
+          </td>
+          <td style="font-size:11.5px;color:var(--text-3);font-family:'JetBrains Mono',monospace;">
+            {{ res.fecha.strftime('%d/%m/%Y %H:%M') if res.fecha else '—' }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="v-empty-row">Aún no has presentado ningún examen. ¡Sube tu .md y empieza!</div>
+    {% endif %}
+  </div>
+
+</div>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const dzTxt = document.getElementById('dzTxt');
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) dzTxt.textContent = fileInput.files[0].name;
+});
+const togglePaste = document.getElementById('togglePaste');
+const pasteArea = document.getElementById('pasteArea');
+let pasteMode = false;
+togglePaste.addEventListener('click', () => {
+  pasteMode = !pasteMode;
+  pasteArea.style.display = pasteMode ? 'block' : 'none';
+  togglePaste.textContent = pasteMode ? 'Usar archivo en su lugar' : 'O pega el contenido directamente';
+  if (pasteMode) { fileInput.value=''; dzTxt.textContent='Selecciona o arrastra tu .md'; pasteArea.focus(); }
+});
+</script>
+</body>
+</html>
