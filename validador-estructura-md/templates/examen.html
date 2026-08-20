@@ -155,8 +155,18 @@ function marcarCB(id, cb){
 function contar(){
   let c=0;
   for(let i=0;i<TOTAL;i++){
-    if(document.querySelectorAll(`input[name="q${i}"]:checked`).length) c++;
-    else{ const t=document.querySelector(`input[name="q${i}"][type="text"]`); if(t&&t.value.trim()) c++; }
+    // opcion multiple / respuesta multiple
+    if(document.querySelectorAll(`input[name="q${i}"]:checked`).length){ c++; continue; }
+    // completar codigo: buscar q{i}_h0, q{i}_h1, etc.
+    const huecos = document.querySelectorAll(`input[name^="q${i}_h"]`);
+    if(huecos.length > 0){
+      const llenos = [...huecos].filter(h => h.value.trim()).length;
+      if(llenos > 0) c++;
+      continue;
+    }
+    // texto simple (fallback)
+    const t = document.querySelector(`input[name="q${i}"][type="text"]`);
+    if(t && t.value.trim()) c++;
   }
   document.getElementById('qCount').textContent=`${c} / ${TOTAL} respondidas`;
 }
