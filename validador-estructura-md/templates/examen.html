@@ -103,9 +103,16 @@
       {% elif p.tipo == 'completar_codigo' %}
         <div class="v-instruccion">{{ p.instruccion }}</div>
         <div class="v-codigo-hueco">{{ p.codigo_con_huecos }}</div>
-        <input class="v-hueco-input" type="text" name="q{{ i }}"
-          placeholder="Escribe la palabra que va en _____"
-          autocomplete="off" oninput="contar()">
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px;">
+          {% for j in range(p.respuestas|length) %}
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:11px;color:var(--text-3);font-family:'JetBrains Mono',monospace;white-space:nowrap;">Hueco {{ j+1 }}:</span>
+            <input class="v-hueco-input" type="text" name="q{{ i }}_h{{ j }}"
+              placeholder="Palabra {{ j+1 }}"
+              autocomplete="off" oninput="contar()" style="flex:1;">
+          </div>
+          {% endfor %}
+        </div>
       {% endif %}
     </div>
     {% endfor %}

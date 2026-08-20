@@ -237,14 +237,27 @@ def resultado_examen(tipo: str):
                 "seleccionadas": sels, "ok": ok, "explicacion": p.explicacion,
                 "retroalimentacion": p.retroalimentacion if not ok else ""})
         elif p.tipo == "completar_codigo":
-            resp = (request.form.get(clave) or "").strip()
-            ok   = resp.lower() == p.respuestas[0].strip().lower()
-            correctas_count += int(ok)
+            # Múltiples huecos: q0_h0, q0_h1, q0_h2, etc.
+            respuestas_usuario = []
+            todos_ok = True
+            for hi, resp_correcta in enumerate(p.respuestas):
+                resp = (request.form.get(f"{clave}_h{hi}") or
+                        request.form.get(clave) or "").strip()
+                ok_hueco = resp.lower() == resp_correcta.strip().lower()
+                if not ok_hueco: todos_ok = False
+                respuestas_usuario.append({
+                    "usuario": resp,
+                    "correcto": resp_correcta,
+                    "ok": ok_hueco,
+                })
+            correctas_count += int(todos_ok)
             detalle.append({"tipo": "completar_codigo", "instruccion": p.instruccion,
                 "codigo_con_huecos": p.codigo_con_huecos,
-                "respuesta_correcta": p.respuestas[0],
-                "respuesta_usuario": resp, "ok": ok, "explicacion": p.explicacion,
-                "retroalimentacion": p.retroalimentacion if not ok else ""})
+                "respuesta_correcta": p.respuestas,
+                "respuesta_usuario": " / ".join(r["usuario"] for r in respuestas_usuario),
+                "respuestas_usuario": respuestas_usuario,
+                "ok": todos_ok, "explicacion": p.explicacion,
+                "retroalimentacion": p.retroalimentacion if not todos_ok else ""})
 
     calificacion = round((correctas_count / total) * 100) if total else 0
 

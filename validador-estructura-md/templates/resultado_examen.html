@@ -77,17 +77,35 @@
     {% elif d.tipo == 'completar_codigo' %}
       <div class="v-q-texto">{{ d.instruccion }}</div>
       <div class="v-codigo-hueco">{{ d.codigo_con_huecos }}</div>
-      <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;">
-        <div>
-          <div class="v-resp-label">Tu respuesta</div>
-          <span class="v-resp-chip {{ 'ok' if d.ok else 'fail' }}">{{ d.respuesta_usuario or '(sin respuesta)' }}</span>
+      <div style="margin-top:10px;">
+        <div class="v-resp-label" style="margin-bottom:6px;">Respuestas (en orden de los huecos):</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          {% if d.respuestas_usuario %}
+            {% for resp in d.respuestas_usuario %}
+            <div style="text-align:center;">
+              <div style="font-size:10px;color:var(--text-3);margin-bottom:3px;">Hueco {{ loop.index }}</div>
+              <span class="v-resp-chip {{ 'ok' if resp.ok else 'fail' }}">{{ resp.usuario or '(vacío)' }}</span>
+              {% if not resp.ok %}
+              <div style="font-size:10px;color:var(--text-3);margin-top:2px;">✓ {{ resp.correcto }}</div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          {% else %}
+            <span class="v-resp-chip {{ 'ok' if d.ok else 'fail' }}">{{ d.respuesta_usuario or '(sin respuesta)' }}</span>
+            {% if not d.ok %}
+            <div>
+              <div class="v-resp-label">Correctas:</div>
+              {% if d.respuesta_correcta is iterable and d.respuesta_correcta is not string %}
+                {% for rc in d.respuesta_correcta %}
+                <span class="v-resp-chip ok" style="margin-right:4px;">{{ rc }}</span>
+                {% endfor %}
+              {% else %}
+                <span class="v-resp-chip ok">{{ d.respuesta_correcta }}</span>
+              {% endif %}
+            </div>
+            {% endif %}
+          {% endif %}
         </div>
-        {% if not d.ok %}
-        <div>
-          <div class="v-resp-label">Respuesta correcta</div>
-          <span class="v-resp-chip ok">{{ d.respuesta_correcta }}</span>
-        </div>
-        {% endif %}
       </div>
     {% endif %}
 
